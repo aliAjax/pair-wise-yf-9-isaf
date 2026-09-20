@@ -1,6 +1,15 @@
 const storageKey = "zfl18-boardgame-rule-cards";
 const today = new Date();
 
+// 复习台处理顺序：争议 → 遗忘 → 准备 → 计分
+const reviewOrder = ["disputes", "forgets", "setup", "scoring"];
+const categoryMeta = {
+  disputes: { label: "常见争议", short: "争议" },
+  forgets: { label: "容易忘的规则", short: "遗忘" },
+  setup: { label: "开局准备", short: "准备" },
+  scoring: { label: "计分提醒", short: "计分" }
+};
+
 const defaultState = {
   selectedId: "",
   games: [
@@ -52,6 +61,13 @@ const defaultState = {
 let state = loadState();
 if (!state.selectedId) state.selectedId = state.games[0]?.id || "";
 
+// 仅详情页的瞬态界面状态，不持久化
+const ui = {
+  pendingReason: false,
+  reasonError: false,
+  editing: null
+};
+
 const els = {
   searchInput: document.querySelector("#searchInput"),
   playerFilter: document.querySelector("#playerFilter"),
@@ -70,6 +86,8 @@ const els = {
   gameCount: document.querySelector("#gameCount"),
   ruleCount: document.querySelector("#ruleCount"),
   staleGame: document.querySelector("#staleGame"),
+  reviewedCount: document.querySelector("#reviewedCount"),
+  pendingCount: document.querySelector("#pendingCount"),
   visibleCount: document.querySelector("#visibleCount")
 };
 
@@ -96,6 +114,59 @@ function getAllRules(game) {
   return [...game.forgets, ...game.disputes, ...game.setup, ...game.scoring];
 }
 
+function buildQueue(game) {
+  return reviewOrder.flatMap((key) => game[key].map((text) => ({ key, text })));
+}
+
+function createReview(game) {
+  return {
+    status: "active",
+    queue: buildQueue(game),
+    position: 0,
+    marks: {},
+    startedAt: new Date().toISOString(),
+    completedAt: null
+  };
+}
+
+function startReview(game) {
+  game.review = createReview(game);
+}
+
+// 复习中编辑或移除卡片：立即退回未完成，已通过项全部重新排队
+function resetReview(game) {
+  if (game.review) game.review = createReview(game);
+}
+
+function getReviewStats(game) {
+  const review = game.review;
+  if (!review) return { total: 0, done: 0, passed: 0, pending: 0 };
+  const marks = Object.values(review.marks);
+  return {
+    total: review.queue.length,
+    done: Math.min(review.position, review.queue.length),
+    passed: marks.filter((mark) => mark.result === "passed").length,
+    pending: marks.filter((mark) => mark.result === "pending").length
+  };
+}
+
+function markCurrentCard(game, result, reason = "") {
+  const review = game.review;
+  if (!review || review.status !== "active" || review.position >= review.queue.length) return;
+  review.marks[review.position] = reason ? { result, reason } : { result };
+  review.position += 1;
+  if (review.position >= review.queue.length) {
+    review.status = "done";
+    review.completedAt = new Date().toISOString();
+  }
+}
+
+function resetDetailUi() {
+  ui.pendingReason = false;
+  ui.reasonError = false;
+  ui.editing = null;
+}
+
 function getFilteredGames() {
   const keyword = els.searchInput.value.trim();
   const player = els.playerFilter.value;
@@ -119,9 +190,25 @@ function getFilteredGames() {
 function renderSummary() {
   const allRuleCount = state.games.reduce((sum, game) => sum + getAllRules(game).length, 0);
   const stale = [...state.games].sort((a, b) => daysSince(b.lastPlayed) - daysSince(a.lastPlayed))[0];
+  const reviewed = state.games.filter((game) => game.review?.status === "done").length;
+  const pendingTotal = state.games.reduce((sum, game) => sum + getReviewStats(game).pending, 0);
   els.gameCount.textContent = state.games.length;
   els.ruleCount.textContent = allRuleCount;
   els.staleGame.textContent = stale ? `${daysSince(stale.lastPlayed)}天` : "-";
+  els.reviewedCount.textContent = `${reviewed}/${state.games.length}`;
+  els.pendingCount.textContent = pendingTotal;
+}
+
+function renderReviewBadge(game) {
+  const review = game.review;
+  if (!review) return `<span class="pill review-none">未复习</span>`;
+  const stats = getReviewStats(game);
+  if (review.status === "done") {
+    return `<span class="pill review-done">已复习</span>${
+      stats.pending ? `<span class="pill review-pending">待确认 ${stats.pending}</span>` : ""
+    }`;
+  }
+  return `<span class="pill review-active">复习中 ${stats.done}/${stats.total}</span>`;
 }
 
 function renderList() {
@@ -147,6 +234,7 @@ function renderList() {
                 <span class="pill">${game.minPlayers}-${game.maxPlayers}人</span>
                 <span class="pill">${game.duration}分钟</span>
                 <span class="pill heavy">${escapeHtml(game.complexity)}</span>
+                ${renderReviewBadge(game)}
               </div>
             </div>
           </article>
@@ -176,6 +264,7 @@ function renderDetail() {
           <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
         </div>
       </div>
+      ${renderReviewDesk(game)}
       ${renderRuleSection("容易忘的规则", "forgets", game.forgets)}
       ${renderRuleSection("常见争议", "disputes", game.disputes)}
       ${renderRuleSection("开局准备", "setup", game.setup)}
@@ -198,6 +287,111 @@ function renderDetail() {
   `;
 }
 
+function renderReviewDesk(game) {
+  const review = game.review;
+
+  if (!review) {
+    const total = buildQueue(game).length;
+    return `
+      <section class="review-desk">
+        <div class="review-head">
+          <h3>聚会前复习台</h3>
+          <span class="pill review-none">未开始</span>
+        </div>
+        <p class="review-hint">按 争议 → 遗忘 → 准备 → 计分 的顺序生成 ${total} 张待复习卡，逐张标记「已过」或「待确认」。</p>
+        <button class="primary" id="startReviewBtn" type="button" ${total ? "" : "disabled"}>生成待复习卡</button>
+        ${total ? "" : `<p class="field-error">请先在下方添加规则卡片。</p>`}
+      </section>
+    `;
+  }
+
+  if (review.status === "done") {
+    const stats = getReviewStats(game);
+    const pendingItems = review.queue
+      .map((card, index) => ({ card, mark: review.marks[index] }))
+      .filter((item) => item.mark && item.mark.result === "pending");
+    return `
+      <section class="review-desk">
+        <div class="review-head">
+          <h3>复习完成</h3>
+          <span class="pill review-done">已完成</span>
+        </div>
+        <p class="review-hint">共 ${stats.total} 张 · 已过 ${stats.passed} · 待确认 ${stats.pending}${
+          review.completedAt ? ` · 完成于 ${review.completedAt.slice(0, 10)}` : ""
+        }</p>
+        ${
+          pendingItems.length
+            ? `<ul class="pending-list">
+                ${pendingItems
+                  .map(
+                    ({ card, mark }) => `
+                      <li>
+                        <div class="pending-card">
+                          <span class="pill cat-${card.key}">${categoryMeta[card.key].short}</span>
+                          <span>${escapeHtml(card.text)}</span>
+                        </div>
+                        <span class="pending-reason-text">原因：${escapeHtml(mark.reason)}</span>
+                      </li>
+                    `
+                  )
+                  .join("")}
+              </ul>`
+            : `<p class="review-hint">没有待确认项，可以放心开局。</p>`
+        }
+        <button id="restartReviewBtn" type="button">重新复习</button>
+      </section>
+    `;
+  }
+
+  if (!review.queue.length) {
+    return `
+      <section class="review-desk">
+        <div class="review-head">
+          <h3>聚会前复习台</h3>
+          <span class="pill review-active">复习中</span>
+        </div>
+        <p class="review-hint">当前没有待复习卡片，请在下方添加规则卡片。</p>
+        <button id="restartReviewBtn" type="button">重新生成</button>
+      </section>
+    `;
+  }
+
+  const card = review.queue[review.position];
+  const progress = Math.round((review.position / review.queue.length) * 100);
+  return `
+    <section class="review-desk">
+      <div class="review-head">
+        <h3>复习台</h3>
+        <span class="pill review-active">第 ${review.position + 1} / ${review.queue.length} 张</span>
+      </div>
+      <div class="review-progress"><span style="width: ${progress}%"></span></div>
+      <div class="review-card">
+        <span class="pill cat-${card.key}">${categoryMeta[card.key].label}</span>
+        <p>${escapeHtml(card.text)}</p>
+      </div>
+      ${
+        ui.pendingReason
+          ? `<form class="pending-reason" id="pendingReasonForm">
+              <label>
+                待确认原因（必填）
+                <textarea id="pendingReasonInput" rows="2" placeholder="例：规则书出处不确定，开局前要查证" autofocus required></textarea>
+              </label>
+              ${ui.reasonError ? `<p class="field-error">待确认必须写明原因。</p>` : ""}
+              <div class="review-actions">
+                <button class="primary" type="submit">确认待确认</button>
+                <button type="button" id="cancelPendingBtn">返回</button>
+              </div>
+            </form>`
+          : `<div class="review-actions">
+              <button class="primary" id="markPassedBtn" type="button">已过</button>
+              <button id="markPendingBtn" type="button">待确认</button>
+            </div>`
+      }
+      <button id="restartReviewBtn" type="button">重新开始</button>
+    </section>
+  `;
+}
+
 function renderRuleSection(title, key, items) {
   return `
     <section class="rule-section">
@@ -205,14 +399,31 @@ function renderRuleSection(title, key, items) {
       <ul class="rule-list">
         ${
           items
-            .map(
-              (item, index) => `
+            .map((item, index) => {
+              const isEditing = ui.editing && ui.editing.key === key && ui.editing.index === index;
+              if (isEditing) {
+                return `
+                  <li>
+                    <form class="edit-rule" id="editRuleForm">
+                      <textarea id="editRuleText" rows="2" required>${escapeHtml(item)}</textarea>
+                      <div class="edit-actions">
+                        <button class="primary" type="submit">保存</button>
+                        <button type="button" id="cancelEditBtn">取消</button>
+                      </div>
+                    </form>
+                  </li>
+                `;
+              }
+              return `
                 <li>
                   <span>${escapeHtml(item)}</span>
-                  <button type="button" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+                  <div class="rule-buttons">
+                    <button type="button" title="编辑" data-edit-key="${key}" data-edit-index="${index}">✎</button>
+                    <button type="button" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+                  </div>
                 </li>
-              `
-            )
+              `;
+            })
             .join("") || `<li><span>暂无内容。</span></li>`
         }
       </ul>
@@ -261,6 +472,7 @@ async function addGame(event) {
   };
   state.games.unshift(game);
   state.selectedId = game.id;
+  resetDetailUi();
   els.gameForm.reset();
   setDefaultDate();
   renderAll();
@@ -290,44 +502,126 @@ els.gameForm.addEventListener("submit", addGame);
 els.gameList.addEventListener("click", (event) => {
   const card = event.target.closest("[data-game-id]");
   if (!card) return;
+  if (card.dataset.gameId !== state.selectedId) resetDetailUi();
   state.selectedId = card.dataset.gameId;
   renderAll();
 });
 
 els.detailView.addEventListener("submit", (event) => {
-  if (event.target.id !== "ruleForm") return;
   event.preventDefault();
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
-  const key = document.querySelector("#ruleTypeInput").value;
-  const text = document.querySelector("#ruleTextInput").value.trim();
-  if (!text) return;
-  game[key].push(text);
-  renderAll();
+
+  if (event.target.id === "ruleForm") {
+    const key = document.querySelector("#ruleTypeInput").value;
+    const text = document.querySelector("#ruleTextInput").value.trim();
+    if (!text) return;
+    game[key].push(text);
+    // 复习会话存在时新卡直接入队；已完成的会话因此退回未完成
+    const review = game.review;
+    if (review) {
+      review.queue.push({ key, text });
+      if (review.status === "done") {
+        review.status = "active";
+        review.completedAt = null;
+      }
+    }
+    renderAll();
+    return;
+  }
+
+  if (event.target.id === "editRuleForm") {
+    const text = document.querySelector("#editRuleText").value.trim();
+    if (!text || !ui.editing) return;
+    game[ui.editing.key][ui.editing.index] = text;
+    ui.editing = null;
+    resetReview(game);
+    renderAll();
+    return;
+  }
+
+  if (event.target.id === "pendingReasonForm") {
+    const reason = document.querySelector("#pendingReasonInput").value.trim();
+    if (!reason) {
+      ui.reasonError = true;
+      renderAll();
+      return;
+    }
+    markCurrentCard(game, "pending", reason);
+    ui.pendingReason = false;
+    ui.reasonError = false;
+    renderAll();
+  }
 });
 
 els.detailView.addEventListener("click", (event) => {
-  const ruleButton = event.target.closest("[data-rule-key]");
-  const playedButton = event.target.closest("#playedTodayBtn");
-  const deleteButton = event.target.closest("#deleteGameBtn");
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
 
+  const ruleButton = event.target.closest("[data-rule-key]");
   if (ruleButton) {
     const key = ruleButton.dataset.ruleKey;
     const index = Number(ruleButton.dataset.ruleIndex);
     game[key].splice(index, 1);
+    resetReview(game);
+    resetDetailUi();
     renderAll();
+    return;
   }
 
-  if (playedButton) {
+  const editButton = event.target.closest("[data-edit-key]");
+  if (editButton) {
+    ui.editing = { key: editButton.dataset.editKey, index: Number(editButton.dataset.editIndex) };
+    ui.pendingReason = false;
+    ui.reasonError = false;
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#cancelEditBtn")) {
+    ui.editing = null;
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#startReviewBtn") || event.target.closest("#restartReviewBtn")) {
+    startReview(game);
+    resetDetailUi();
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#markPassedBtn")) {
+    markCurrentCard(game, "passed");
+    resetDetailUi();
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#markPendingBtn")) {
+    ui.pendingReason = true;
+    ui.reasonError = false;
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#cancelPendingBtn")) {
+    ui.pendingReason = false;
+    ui.reasonError = false;
+    renderAll();
+    return;
+  }
+
+  if (event.target.closest("#playedTodayBtn")) {
     game.lastPlayed = new Date().toISOString().slice(0, 10);
     renderAll();
+    return;
   }
 
-  if (deleteButton) {
+  if (event.target.closest("#deleteGameBtn")) {
     state.games = state.games.filter((item) => item.id !== game.id);
     state.selectedId = state.games[0]?.id || "";
+    resetDetailUi();
     renderAll();
   }
 });

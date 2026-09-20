@@ -124,7 +124,7 @@ h3 {
 
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(108px, 1fr));
+  grid-template-columns: repeat(5, minmax(96px, 1fr));
   gap: 10px;
 }
 
@@ -367,6 +367,185 @@ label {
 
 .detail-actions button {
   flex: 1;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-desk {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(160deg, rgba(49, 95, 134, 0.07), rgba(213, 162, 61, 0.06)),
+    #fff;
+  padding: 12px;
+}
+
+.review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-head h3 {
+  margin: 0;
+}
+
+.review-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.review-progress {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #e7eaed;
+}
+
+.review-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+  transition: width 0.2s ease;
+}
+
+.review-card {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.review-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.review-actions button {
+  flex: 1;
+}
+
+.pending-reason {
+  display: grid;
+  gap: 8px;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pending-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-list li {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+}
+
+.pending-card {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  line-height: 1.45;
+}
+
+.pending-reason-text {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill.review-none {
+  background: rgba(104, 112, 121, 0.12);
+  color: var(--muted);
+}
+
+.pill.review-active {
+  background: rgba(49, 95, 134, 0.12);
+  color: var(--blue);
+}
+
+.pill.review-done {
+  background: rgba(57, 116, 91, 0.14);
+  color: var(--green);
+}
+
+.pill.review-pending {
+  background: rgba(213, 162, 61, 0.2);
+  color: #8a6414;
+}
+
+.pill.cat-disputes {
+  background: rgba(179, 72, 72, 0.12);
+  color: var(--red);
+}
+
+.pill.cat-forgets {
+  background: rgba(213, 162, 61, 0.18);
+  color: #8a6414;
+}
+
+.pill.cat-setup {
+  background: rgba(49, 95, 134, 0.12);
+  color: var(--blue);
+}
+
+.pill.cat-scoring {
+  background: rgba(57, 116, 91, 0.14);
+  color: var(--green);
+}
+
+.rule-buttons {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.edit-rule {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.edit-rule button {
+  width: auto;
+  height: auto;
+  padding: 10px 13px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 1160px) {
